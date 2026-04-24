@@ -12,6 +12,7 @@ Runner hỗ trợ:
 - `stop`
 - `status`
 - `sync-now`
+- `daemon` (phù hợp cho Docker/container)
 
 ## Cấu trúc repo
 - `scripts/codex-sync-runner.js`: CLI entrypoint
@@ -19,13 +20,16 @@ Runner hỗ trợ:
 - `tests/unit/codex-sync-*.test.js`: unit tests
 - `docs/codex-sync-runner.md`: command/runtime docs
 - `docs/codex-sync-ops-checklist.md`: reject reason / error category runbook
+- `Dockerfile`: image runner standalone
+- `docker-compose.yml`: stack local gồm runner + MinIO
 
 ## Yêu cầu
 - Node.js >= 20
 - npm
+- Docker / Docker Compose nếu muốn chạy container
 - Nếu test remote thật: có bucket S3/MinIO hợp lệ
 
-## Cài đặt
+## Cài đặt local
 ```bash
 npm install
 ```
@@ -56,7 +60,7 @@ npm install
 ### Optional encryption
 - `SYNC_SHARED_KEY=<shared-key>`
 
-## Ví dụ cấu hình MinIO
+## Ví dụ cấu hình MinIO remote thật
 ```bash
 export DATA_DIR="$HOME/.9router"
 export CODEX_SYNC_REMOTE_MODE=minio
@@ -68,7 +72,7 @@ export CODEX_SYNC_S3_SECRET_ACCESS_KEY="supersecret"
 export CODEX_SYNC_S3_FORCE_PATH_STYLE=true
 ```
 
-## Cách chạy
+## Cách chạy local
 ### 1. Kiểm tra trạng thái
 ```bash
 npm run status
@@ -89,12 +93,133 @@ npm run sync-now
 npm run stop
 ```
 
-### 5. Gọi trực tiếp CLI
+### 5. Chạy foreground daemon
+```bash
+npm run daemon
+```
+
+### 6. Gọi trực tiếp CLI
 ```bash
 node scripts/codex-sync-runner.js start --json
 node scripts/codex-sync-runner.js status --json
 node scripts/codex-sync-runner.js sync-now --json
 node scripts/codex-sync-runner.js stop --json
+node scripts/codex-sync-runner.js daemon
+```
+
+# Docker
+
+## 1. Chạy nhanh bằng Docker Compose (local MinIO đi kèm)
+Repo đã có sẵn `docker-compose.yml` gồm 3 service:
+- `minio`: object storage local
+- `minio-init`: tự tạo bucket
+- `codex-sync-runner`: runner chính
+
+### Start stack
+```bash
+docker compose up -d --build
+```
+
+### Xem logs
+```bash
+docker compose logs -f codex-sync-runner
+docker compose logs -f minio
+```
+
+### Stop stack
+```bash
+docker compose down
+```
+
+### Xóa luôn volumes
+```bash
+docker compose down -v
+```
+
+## 2. Tài khoản / mật khẩu MinIO trong Docker
+Mặc định trong `docker-compose.yml`:
+- `MINIO_ROOT_USER=minioadmin`
+- `MINIO_ROOT_PASSWORD=supersecret`
+- bucket mặc định: `uploads`
+
+Console MinIO mặc định:
+- URL: `http://localhost:9001`
+- user: `minioadmin`
+- password: `supersecret`
+
+API MinIO mặc định:
+- endpoint nội bộ cho runner: `http://minio:9000`
+- endpoint ngoài host: `http://localhost:9000`
+
+Nếu muốn đổi, tạo file `.env` cạnh `docker-compose.yml`:
+```bash
+MINIO_ROOT_USER=myminio
+MINIO_ROOT_PASSWORD=mysecret123
+MINIO_BUCKET=uploads
+MINIO_API_PORT=9000
+MINIO_CONSOLE_PORT=9001
+
+CODEX_SYNC_REMOTE_MODE=minio
+CODEX_SYNC_S3_ENDPOINT=http://minio:9000
+CODEX_SYNC_S3_BUCKET=uploads
+CODEX_SYNC_S3_REGION=us-east-1
+CODEX_SYNC_S3_ACCESS_KEY_ID=myminio
+CODEX_SYNC_S3_SECRET_ACCESS_KEY=mysecret123
+CODEX_SYNC_S3_FORCE_PATH_STYLE=true
+```
+
+Sau đó chạy lại:
+```bash
+docker compose up -d --build
+```
+
+## 3. Gắn `db.json` thật của cậu vào container
+Runner đọc local DB tại `/data/db.json` trong container.
+
+Nếu cậu muốn runner sync trực tiếp từ file host, sửa phần volume trong `docker-compose.yml`:
+```yaml
+    volumes:
+      - runner-data:/data
+      - /absolute/path/to/db.json:/data/db.json
+```
+
+Ví dụ:
+```yaml
+      - /home/huynq/.9router/db.json:/data/db.json
+```
+
+> Lưu ý: file host phải tồn tại và container phải có quyền đọc/ghi.
+
+## 4. Gọi lệnh trong container
+Vì container runner chạy ở mode `daemon`, cậu có thể gọi command riêng bằng `docker compose exec`:
+
+```bash
+docker compose exec codex-sync-runner node scripts/codex-sync-runner.js status --json
+docker compose exec codex-sync-runner node scripts/codex-sync-runner.js sync-now --json
+docker compose exec codex-sync-runner node scripts/codex-sync-runner.js stop --json
+```
+
+> Nếu stop runner trong container thì process daemon sẽ dừng. Khi đó container có thể thoát; chỉ cần `docker compose up -d codex-sync-runner` để chạy lại.
+
+## 5. Chạy chỉ image runner (không compose)
+Build image:
+```bash
+docker build -t sync-9router-codex-auth .
+```
+
+Run với MinIO remote có sẵn:
+```bash
+docker run --rm -it \
+  -e DATA_DIR=/data \
+  -e CODEX_SYNC_REMOTE_MODE=minio \
+  -e CODEX_SYNC_S3_ENDPOINT=https://api-minio.littlepea.site \
+  -e CODEX_SYNC_S3_BUCKET=uploads \
+  -e CODEX_SYNC_S3_REGION=us-east-1 \
+  -e CODEX_SYNC_S3_ACCESS_KEY_ID=minioadmin \
+  -e CODEX_SYNC_S3_SECRET_ACCESS_KEY=supersecret \
+  -e CODEX_SYNC_S3_FORCE_PATH_STYLE=true \
+  -v /absolute/path/to/local-data:/data \
+  sync-9router-codex-auth
 ```
 
 ## Chạy test
@@ -111,6 +236,11 @@ npx vitest run --config ./vitest.config.js tests/unit/codex-sync-conflict-loop.t
 ### Syntax check CLI
 ```bash
 npm run build
+```
+
+### Verify Docker config
+```bash
+docker compose config
 ```
 
 ## Điều kiện dữ liệu local
