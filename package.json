@@ -1,0 +1,25 @@
+{
+  "name": "sync-9router-codex-auth",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone Codex auth S3/MinIO sync runner extracted from 9router",
+  "scripts": {
+    "test": "vitest run --config ./vitest.config.js",
+    "test:watch": "vitest --config ./vitest.config.js",
+    "build": "node --check scripts/codex-sync-runner.js",
+    "start": "node scripts/codex-sync-runner.js start --json",
+    "stop": "node scripts/codex-sync-runner.js stop --json",
+    "status": "node scripts/codex-sync-runner.js status --json",
+    "sync-now": "node scripts/codex-sync-runner.js sync-now --json"
+  },
+  "dependencies": {
+    "proper-lockfile": "^4.1.2"
+  },
+  "devDependencies": {
+    "vitest": "^4.0.7"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
