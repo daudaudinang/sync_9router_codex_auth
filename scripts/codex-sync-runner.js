@@ -28,6 +28,7 @@ import {
 } from "../src/services/codex-sync/runner/process-manager.js";
 import { RunnerStateStore } from "../src/services/codex-sync/runner/state-store.js";
 import { runSyncCycle } from "../src/services/codex-sync/runner/sync-cycle.js";
+import { createDashboardServer } from "../src/services/codex-sync/runner/dashboard-server.js";
 
 function parseArgs(argv) {
   const args = [...argv];
@@ -100,9 +101,22 @@ async function runDaemon({ config, stateStore, dbAdapter, remoteClient }) {
     throw error;
   }
 
+  let dashboardServer = null;
+
   try {
     writePidFile(config.pidFile, process.pid);
     stateStore.markRunning(process.pid);
+
+    // Start dashboard HTTP server
+    if (config.dashboard?.enabled) {
+      dashboardServer = createDashboardServer({
+        stateStore,
+        dbAdapter,
+        config,
+        buildStatusFn: () => buildStatusPayload({ stateStore, pidFile: config.pidFile }),
+        sendCommandFn: (request) => sendCommandToRunner({ config, stateStore, request }),
+      });
+    }
 
     let stopRequested = false;
     let syncNowPending = false;
@@ -221,6 +235,9 @@ async function runDaemon({ config, stateStore, dbAdapter, remoteClient }) {
         await sleep(config.pollIntervalMs);
       }
     } finally {
+      if (dashboardServer) {
+        dashboardServer.close();
+      }
       clearPidFile(config.pidFile);
       stateStore.markStopped();
     }

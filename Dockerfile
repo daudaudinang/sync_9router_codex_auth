@@ -15,4 +15,6 @@ ENV DATA_DIR=/data
 
 VOLUME ["/data"]
 
+EXPOSE 3001
+
 CMD ["node", "scripts/codex-sync-runner.js", "daemon"]

@@ -268,9 +268,11 @@ export function applyMergedLocalRecords(db, mergedLocalRecordsByKey) {
     nextConnections.push(clone(record));
   }
 
-  // Dedupe codex/oauth records by inventoryKey — keep only the first match per key.
-  // Duplicates can exist from legacy createProviderConnection paths that created
-  // multiple records for the same account before email/accountId was populated.
+  // Dedupe codex/oauth records by inventoryKey (email+accountId combo).
+  // Keep only the first match per key. Duplicates can exist from legacy
+  // createProviderConnection paths that created multiple records before
+  // email/accountId was populated.
+  // NOTE: same email with different accountId is VALID (different Codex orgs).
   const seenKeys = new Set();
   const deduped = nextConnections.filter((record) => {
     if (record?.provider !== "codex" || record?.authType !== "oauth") {

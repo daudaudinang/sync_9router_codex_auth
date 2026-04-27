@@ -57,6 +57,10 @@ export function loadRunnerConfig() {
       sharedKey: process.env.SYNC_SHARED_KEY || "",
       enabled: Boolean(process.env.SYNC_SHARED_KEY),
     },
+    dashboard: {
+      port: parseInteger(process.env.DASHBOARD_PORT, 3001),
+      enabled: parseBoolean(process.env.DASHBOARD_ENABLED, true),
+    },
   };
 
   return config;
