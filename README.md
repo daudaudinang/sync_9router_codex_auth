@@ -14,6 +14,9 @@ Runner hỗ trợ:
 - `sync-now`
 - `daemon` (phù hợp cho Docker/container)
 
+Ngoài ra có script hỗ trợ:
+- `backfill-identity`: backfill `email` + `accountId` cho record Codex OAuth bị thiếu bằng cách decode `idToken`
+
 ## Cấu trúc repo
 - `scripts/codex-sync-runner.js`: CLI entrypoint
 - `src/services/codex-sync/**`: core sync logic
@@ -106,6 +109,39 @@ node scripts/codex-sync-runner.js sync-now --json
 node scripts/codex-sync-runner.js stop --json
 node scripts/codex-sync-runner.js daemon
 ```
+
+## Backfill account thiếu email/accountId
+Nếu DB có các record Codex OAuth vẫn còn `accessToken` / `refreshToken` / `idToken` nhưng thiếu:
+- `email`
+- `providerSpecificData.accountId`
+
+thì có thể dùng script ngoài code 9router để vá lại từ claim trong `idToken`.
+
+### Dry-run
+```bash
+DATA_DIR=/var/lib/9router npm run backfill-identity
+```
+
+### Ghi thật vào DB
+```bash
+DATA_DIR=/var/lib/9router node scripts/backfill-codex-identity.js --write --json
+```
+
+### Chỉ rõ path DB
+```bash
+node scripts/backfill-codex-identity.js --db-path /var/lib/9router/db.json --write --json
+```
+
+Script sẽ:
+- chỉ quét `provider=codex`, `authType=oauth`
+- decode `idToken`
+- điền `email`
+- điền `providerSpecificData.accountId`
+- tạo `providerSpecificData.inventoryKey`
+- bump / set `providerSpecificData.inventoryRevision`
+- cập nhật `providerSpecificData.inventorySyncUpdatedAt`
+
+> Lưu ý: sync hiện tại **không chỉ nhìn local DB**. Nếu remote S3/MinIO có account hợp lệ mà local chưa có, runner sẽ **pull về local** trong pha merge (`createdLocal` + `pulledFromRemote`). Điều kiện là record remote cũng phải có đủ composite key `email + accountId` và revision hợp lệ.
 
 # Docker
 

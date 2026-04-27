@@ -12,7 +12,8 @@
     "stop": "node scripts/codex-sync-runner.js stop --json",
     "status": "node scripts/codex-sync-runner.js status --json",
     "sync-now": "node scripts/codex-sync-runner.js sync-now --json",
-    "daemon": "node scripts/codex-sync-runner.js daemon"
+    "daemon": "node scripts/codex-sync-runner.js daemon",
+    "backfill-identity": "node scripts/backfill-codex-identity.js --json"
   },
   "dependencies": {
     "proper-lockfile": "^4.1.2"
