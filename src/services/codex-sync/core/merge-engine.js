@@ -180,7 +180,7 @@ export function computeMergePlan({ localRecords = [], remoteRecords = [] }) {
     }
 
     if (!localRecord && remoteRecord) {
-      const localFromRemote = toLocalRecord(normalizeRemoteRecord(remoteRecord));
+      const localFromRemote = toLocalRecord(remoteRecord);
       counts.createdLocal += 1;
       counts.pulledFromRemote += 1;
 
@@ -201,7 +201,7 @@ export function computeMergePlan({ localRecords = [], remoteRecords = [] }) {
 
     if (remoteRevision > localRevision) {
       counts.pulledFromRemote += 1;
-      const localFromRemote = toLocalRecord(normalizeRemoteRecord(remoteRecord), localRecord);
+      const localFromRemote = toLocalRecord(remoteRecord, localRecord);
       mergedLocalMap.set(key, localFromRemote);
       mergedRemoteMap.set(key, clone(remoteRecord));
       continue;
@@ -217,19 +217,18 @@ export function computeMergePlan({ localRecords = [], remoteRecords = [] }) {
       continue;
     }
 
+    // Equal revision + different payload = local was mutated without revision bump
+    // (e.g. 9router refreshed token but didn't bump inventoryRevision).
+    // Bump local revision so local wins. This implements "first to sync wins" semantic.
     counts.equalRevisionPayloadConflictResolved += 1;
+    counts.pushedToRemote += 1;
 
-    if (conflict.winner === "local") {
-      counts.pushedToRemote += 1;
-      mergedLocalMap.set(key, clone(localRecord));
-      mergedRemoteMap.set(key, toRemoteRecord(localRecord));
-      continue;
-    }
+    const bumpedLocal = clone(localRecord);
+    bumpedLocal.providerSpecificData.inventoryRevision = localRevision + 1;
+    bumpedLocal.providerSpecificData.inventorySyncUpdatedAt = new Date().toISOString();
 
-    counts.pulledFromRemote += 1;
-    const winnerLocal = toLocalRecord(normalizeRemoteRecord(remoteRecord), localRecord);
-    mergedLocalMap.set(key, winnerLocal);
-    mergedRemoteMap.set(key, clone(remoteRecord));
+    mergedLocalMap.set(key, bumpedLocal);
+    mergedRemoteMap.set(key, toRemoteRecord(bumpedLocal));
   }
 
   return {
@@ -269,8 +268,28 @@ export function applyMergedLocalRecords(db, mergedLocalRecordsByKey) {
     nextConnections.push(clone(record));
   }
 
+  // Dedupe codex/oauth records by inventoryKey — keep only the first match per key.
+  // Duplicates can exist from legacy createProviderConnection paths that created
+  // multiple records for the same account before email/accountId was populated.
+  const seenKeys = new Set();
+  const deduped = nextConnections.filter((record) => {
+    if (record?.provider !== "codex" || record?.authType !== "oauth") {
+      return true;
+    }
+    const check = validateScopedRecord(record, { requireRevision: false });
+    if (!check.valid || !check.normalized?.inventoryKey) {
+      return true;
+    }
+    const key = check.normalized.inventoryKey;
+    if (seenKeys.has(key)) {
+      return false;
+    }
+    seenKeys.add(key);
+    return true;
+  });
+
   return {
     ...db,
-    providerConnections: nextConnections,
+    providerConnections: deduped,
   };
 }

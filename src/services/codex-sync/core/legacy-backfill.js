@@ -60,6 +60,14 @@ export async function runLegacyBackfill({ dbAdapter, stateStore, now = new Date(
       }
 
       if (!isValidRevision(record.providerSpecificData.inventoryRevision)) {
+        if (record.providerSpecificData.inventorySyncUpdatedAt) {
+          // Record was previously synced (has syncUpdatedAt) but lost its revision —
+          // likely upstream code (9router) overwrote providerSpecificData without preserving it.
+          process.stderr.write(
+            `[legacy-backfill] WARNING: record ${record.email || record.id || "unknown"} ` +
+              `had inventorySyncUpdatedAt but missing/invalid inventoryRevision — resetting to 1\n`,
+          );
+        }
         record.providerSpecificData.inventoryRevision = 1;
         changed = true;
       }
