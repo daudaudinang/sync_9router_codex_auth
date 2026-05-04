@@ -41,6 +41,7 @@ function toRemoteRecord(localRecord) {
       isActive: localRecord.isActive ?? true,
       priority: localRecord.priority ?? 1,
       testStatus: localRecord.testStatus || "active",
+      updatedAt: localRecord?.updatedAt || null,
       providerSpecificData: {
         accountId: localRecord?.providerSpecificData?.accountId,
         orgTitle: localRecord?.providerSpecificData?.orgTitle || null,
@@ -122,6 +123,10 @@ function normalizeRemoteRecord(remoteRecord) {
         remoteRecord?.metadata?.providerSpecificData?.inventorySyncUpdatedAt || null,
     },
     inventoryKey: remoteRecord?.inventoryKey,
+    updatedAt:
+      remoteRecord?.metadata?.updatedAt ??
+      remoteRecord?.metadata?.providerSpecificData?.inventorySyncUpdatedAt ??
+      null,
   };
 
   return localShape;
@@ -217,18 +222,26 @@ export function computeMergePlan({ localRecords = [], remoteRecords = [] }) {
       continue;
     }
 
-    // Equal revision + different payload = local was mutated without revision bump
-    // (e.g. 9router refreshed token but didn't bump inventoryRevision).
-    // Bump local revision so local wins. This implements "first to sync wins" semantic.
     counts.equalRevisionPayloadConflictResolved += 1;
-    counts.pushedToRemote += 1;
 
-    const bumpedLocal = clone(localRecord);
-    bumpedLocal.providerSpecificData.inventoryRevision = localRevision + 1;
-    bumpedLocal.providerSpecificData.inventorySyncUpdatedAt = new Date().toISOString();
+    if (conflict.winner === "local") {
+      counts.pushedToRemote += 1;
+      mergedLocalMap.set(key, clone(localRecord));
+      mergedRemoteMap.set(key, toRemoteRecord(localRecord));
+      continue;
+    }
 
-    mergedLocalMap.set(key, bumpedLocal);
-    mergedRemoteMap.set(key, toRemoteRecord(bumpedLocal));
+    if (conflict.winner === "remote") {
+      counts.pulledFromRemote += 1;
+      const localFromRemote = toLocalRecord(remoteRecord, localRecord);
+      mergedLocalMap.set(key, localFromRemote);
+      mergedRemoteMap.set(key, clone(remoteRecord));
+      continue;
+    }
+
+    throw new Error(
+      `merge invariant: equal-revision payload conflict without winner (winner=${String(conflict.winner)})`,
+    );
   }
 
   return {

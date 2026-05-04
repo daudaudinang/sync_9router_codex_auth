@@ -4,7 +4,7 @@ import {
   applyMergedLocalRecords,
 } from "../../src/services/codex-sync/core/merge-engine.js";
 
-function localRecord({ key, revision, accessToken = "a" }) {
+function localRecord({ key, revision, accessToken = "a", updatedAt = "2026-01-01T00:00:00.000Z" }) {
   return {
     provider: "codex",
     authType: "oauth",
@@ -16,6 +16,7 @@ function localRecord({ key, revision, accessToken = "a" }) {
     testStatus: "active",
     accessToken,
     refreshToken: "rt",
+    updatedAt,
     providerSpecificData: {
       accountId: "acct_1",
       inventoryKey: key,
@@ -25,7 +26,12 @@ function localRecord({ key, revision, accessToken = "a" }) {
   };
 }
 
-function remoteRecord({ key, revision, accessToken = "a" }) {
+function remoteRecord({
+  key,
+  revision,
+  accessToken = "a",
+  metadataUpdatedAt = "2026-01-01T00:00:00.000Z",
+}) {
   return {
     provider: "codex",
     authType: "oauth",
@@ -43,6 +49,7 @@ function remoteRecord({ key, revision, accessToken = "a" }) {
       isActive: true,
       priority: 1,
       testStatus: "active",
+      updatedAt: metadataUpdatedAt,
       providerSpecificData: {
         accountId: "acct_1",
         orgTitle: null,
@@ -86,27 +93,69 @@ describe("codex-sync merge", () => {
     expect(plan.counts.unchanged).toBe(1);
   });
 
-  it("bumps local revision and pushes when equal revision + different payload", () => {
+  it("pushes local when equal revision + different payload and local updatedAt is newer", () => {
     const key = "email:user@example.com|acct:acct_1";
     const plan = computeMergePlan({
-      localRecords: [localRecord({ key, revision: 2, accessToken: "aaa" })],
-      remoteRecords: [remoteRecord({ key, revision: 2, accessToken: "bbb" })],
+      localRecords: [
+        localRecord({
+          key,
+          revision: 2,
+          accessToken: "aaa",
+          updatedAt: "2026-06-02T00:00:00.000Z",
+        }),
+      ],
+      remoteRecords: [
+        remoteRecord({
+          key,
+          revision: 2,
+          accessToken: "bbb",
+          metadataUpdatedAt: "2026-06-01T00:00:00.000Z",
+        }),
+      ],
     });
 
     expect(plan.counts.equalRevisionPayloadConflictResolved).toBe(1);
     expect(plan.counts.pushedToRemote).toBe(1);
     expect(plan.counts.pulledFromRemote).toBe(0);
 
-    // Local should win — verify merged local record has bumped revision
     const mergedLocal = plan.mergedLocalRecordsByKey.get(key);
     expect(mergedLocal).toBeDefined();
-    expect(mergedLocal.providerSpecificData.inventoryRevision).toBe(3);
+    expect(mergedLocal.providerSpecificData.inventoryRevision).toBe(2);
     expect(mergedLocal.accessToken).toBe("aaa");
 
-    // Remote should also have bumped revision + local's token
     const mergedRemote = plan.mergedRemoteRecords[0];
-    expect(mergedRemote.metadata.providerSpecificData.inventoryRevision).toBe(3);
+    expect(mergedRemote.metadata.providerSpecificData.inventoryRevision).toBe(2);
     expect(mergedRemote.credentials.accessToken).toBe("aaa");
+  });
+
+  it("pulls remote when equal revision + different payload and remote updatedAt is newer", () => {
+    const key = "email:user@example.com|acct:acct_1";
+    const plan = computeMergePlan({
+      localRecords: [
+        localRecord({
+          key,
+          revision: 2,
+          accessToken: "aaa",
+          updatedAt: "2026-06-01T00:00:00.000Z",
+        }),
+      ],
+      remoteRecords: [
+        remoteRecord({
+          key,
+          revision: 2,
+          accessToken: "bbb",
+          metadataUpdatedAt: "2026-06-02T00:00:00.000Z",
+        }),
+      ],
+    });
+
+    expect(plan.counts.equalRevisionPayloadConflictResolved).toBe(1);
+    expect(plan.counts.pulledFromRemote).toBe(1);
+    expect(plan.counts.pushedToRemote).toBe(0);
+
+    const mergedLocal = plan.mergedLocalRecordsByKey.get(key);
+    expect(mergedLocal.accessToken).toBe("bbb");
+    expect(mergedLocal.providerSpecificData.inventoryRevision).toBe(2);
   });
 
   it("does not bump revision when payload is identical (unchanged)", () => {
